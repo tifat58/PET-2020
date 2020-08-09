@@ -12,12 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import FakeData
 
 input_size = 784
-hidden_sizes = [128]
-output_size = 10
-epochs = 5
 batch_size = 4
-
-attack_train_set_size = 1000
 
 class Net(nn.Module):
     def __init__(self):
@@ -33,7 +28,9 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=0)
 
 class CustomFakeDataset(Dataset):
-
+    """
+    This dataset generates random images and labels them with a class label queried from a source model (in this case the target model)
+    """
     def __init__(self, source_model, size=1000, image_size=(3, 224, 224), num_classes=10,
                  transform=None, target_transform=None, random_offset=0):
         self.size = size
@@ -65,6 +62,7 @@ class CustomFakeDataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         if self.target_transform is not None:
+            # set the target to the class label predicted by the target model
             target = self.target_transform(self.source_model, img)
 
         return img, target
@@ -73,37 +71,48 @@ class CustomFakeDataset(Dataset):
         return self.size
 
 def train_model(train_model, train_loader, epochs):
+    """
+
+    :param train_model: the model to be trained
+    :param train_loader: the loader accessing the training dataset
+    :param epochs: number of epochs during training
+    :return:
+    """
+    # set model to training mode
     train_model.train()
+
+    # define optimizer and loss function
     optimizer = optim.SGD(train_model.parameters(), lr=0.01, momentum=0.5)
-    #optim.Adadelta(train_model.parameters(), lr=1.0)
-    # create a loss function
     criterion = nn.NLLLoss()
 
-    # run the main training loop
+    # train for the specified number of epochs
     for epoch in range(epochs):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             data, target = Variable(data), Variable(target)
-            # resize data from (batch_size, 1, 28, 28) to (batch_size, 28*28)
             data = data.view(-1, input_size)
             train_model_out = train_model(data)
             loss = criterion(train_model_out, target)
             loss.backward()
             optimizer.step()
             if batch_idx % 5000 == 0:
-                print(loss.data)
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(train_loader.dataset),
                                100. * batch_idx / len(train_loader), loss.data.item()))
     return train_model
 
 def evaluate_model(eval_model, eval_loader):
+    """
 
+    :param eval_model: model to be evaluated
+    :param eval_loader: loader accessing the evaluation data set
+    :return:
+    """
+    # initialize evaluation metrics
     correct = 0
     total = 0
-    class_correct = list(0. for i in range(10))
-    class_total = list(0. for i in range(10))
 
+    # set model to evaluation mode
     eval_model.eval()
 
     with torch.no_grad():
@@ -115,105 +124,87 @@ def evaluate_model(eval_model, eval_loader):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-            c = (predicted == labels).squeeze()
-            for i in range(batch_size):
-                label = labels[i]
-                class_correct[label] += c[i].item()
-                class_total[label] += 1
     print('Accuracy: %d %%' % (100 * correct / total))
-
-    for i in range(10):
-        print('Accuracy of %5s : %2d %%' % (i, 100 * class_correct[i] / class_total[i]))
 
 
 def query_model(model, image):
+    """
+    Query the given model with an image
+    :param model: the model to be queried
+    :param image: the image to query the model with
+    :return: the predicted class
+    """
     image = Variable(image)
     image = image.view(-1, input_size)
     with torch.no_grad():
         outputs = model(image)
-        print(outputs)
     _, predicted = torch.max(outputs.data, 1)
-    print("Predicted: %s" % predicted)
+    predicted = predicted[0]
+    # return the class label
     return predicted
 
+def target_transform (model, image):
+    """
+    Transform function used in the random dataset to generate class labels by querying the target model
+    :param model: the model to be queried to create the class label
+    :param image: the image to create a class label for
+    :return:
+    """
+    return query_model(model, image)
+
+# Main flow ------------------------------------------------------------------------------------------------------------
+
+# Initialize transform function for data sets
 transform = torchvision.transforms.Compose([
        torchvision.transforms.ToTensor(),
        torchvision.transforms.Normalize(
              (0.5,), (0.5,))
      ])
 
+# Define constants used to store / load datasets and model weights
 DATASET_PATH = './data'
 TARGET_MODEL_PATH = './model_stealing_target_model.pth'
+ATTACK_MODEL_PATH = './model_stealing_attack_model.pth'
 
+# build the training and evaluation dataset for the target model
 train_dataset = torchvision.datasets.MNIST(root = './data', train = True, transform = transform, download=True)
 verify_dataset = torchvision.datasets.MNIST(root = './data', train = False, transform = transform, download=True)
 
-#train_dataset, verify_dataset = torch.utils.data.random_split(complete_dataset, [50000, 10000])
-#print(len(train_dataset))
-
-
+# Initialize the loaders for both datasets
 target_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 target_verify_loader = torch.utils.data.DataLoader(verify_dataset, batch_size=batch_size, shuffle=True)
 
-
+# Initialize the target model
 target_model = Net()
 
+# Train the target model (uncomment to enable training instead of loading pretrained model data)
 #target_model = train_model(target_model, target_train_loader, 4)
 #torch.save(target_model.state_dict(), TARGET_MODEL_PATH)
 
-
+# Load the pretrained target model (comment out to enable training instead of loading pretrained model data)
 target_model.load_state_dict(torch.load(TARGET_MODEL_PATH))
-#print(target_model.fc1.weight.data)
 
-def target_transform (model, image):
-    return query_model(model, image)
 
-attack_train_dataset = CustomFakeDataset(size=1000, image_size = (28, 28), source_model=target_model, transform = transform, target_transform = target_transform)
+# build the training dataset and loader for the attack model
+attack_train_dataset = CustomFakeDataset(size=10000, image_size = (28, 28), source_model=target_model, transform = transform, target_transform = target_transform)
 attack_train_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
 
+# Initialize the attack model
+attack_model = Net()
 
-evaluate_model(target_model, target_verify_loader)
+# Train the attack model (uncomment to enable training instead of loading pretrained model data)
+#attack_model = train_model(attack_model, attack_train_loader, 40)
+#torch.save(attack_model.state_dict(), ATTACK_MODEL_PATH)
 
-exit(1)
+# Load the pretrained attack model (comment out to enable training instead of loading pretrained model data)
+attack_model.load_state_dict(torch.load(ATTACK_MODEL_PATH))
 
+# Evaluate model accuracy
+#evaluate_model(target_model, target_verify_loader)
+#evaluate_model(attack_model, target_verify_loader)
 
-for batch_idx, (data, target) in enumerate(target_train_loader):
-    data, target = Variable(data), Variable(target)
-    #print(data)
-    #print(data.shape)
-    #print(target)
-    break
+# Calculate the average distance between the weights of the hidden layers of both models
+layer_size = target_model.fc2.weight.data.size(0)
+distance = target_model.fc2.weight.data - attack_model.fc2.weight.data
 
-
-
-#for batch_idx, (data, target) in enumerate(target_train_loader):
-    #data, target = Variable(data), Variable(target)
-    #query_model(target_model, data)
-    #print(data)
-    #print(data.shape)
-    #print(target)
-
-
-
-
-
-exit(1)
-
-
-for batch_idx, (data, target) in enumerate(target_train_loader):
-    #query_model(target_model, data)
-    break
-    #print(data.shape)
-    #print(target)
-
-exit(1)
-attack_images = []
-attack_labels = []
-
-for i in range(attack_train_set_size):
-    attack_images.append(np.random.random((28,28)))
-
-
-print(target_model)
-
-
+print("Average distance between weights in layer fc2: ", abs(torch.sum(distance).item() / layer_size))
