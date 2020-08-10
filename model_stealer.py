@@ -209,7 +209,7 @@ def main(dataset_name):
 
 
     # Train the target model (uncomment to enable training instead of loading pretrained model data)
-    target_model = train_model(target_model, target_train_loader, 1, model_input_size)
+    target_model = train_model(target_model, target_train_loader, 20, model_input_size)
     torch.save(target_model.state_dict(), TARGET_MODEL_PATH)
 
     # Load the pretrained target model (comment out to enable training instead of loading pretrained model data)
@@ -224,7 +224,7 @@ def main(dataset_name):
     attack_model = Net(model_input_size)
 
     # Train the attack model (uncomment to enable training instead of loading pretrained model data)
-    attack_model = train_model(attack_model, attack_train_loader, 1, model_input_size)
+    attack_model = train_model(attack_model, attack_train_loader, 20, model_input_size)
     torch.save(attack_model.state_dict(), ATTACK_MODEL_PATH)
 
     # Load the pretrained attack model (comment out to enable training instead of loading pretrained model data)
