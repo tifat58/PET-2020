@@ -18,9 +18,9 @@ batch_size = 4
 class Net(nn.Module):
     def __init__(self, input_size):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_size, 200)
-        self.fc2 = nn.Linear(200, 200)
-        self.fc3 = nn.Linear(200, 10)
+        self.fc1 = nn.Linear(input_size, 20)
+        self.fc2 = nn.Linear(20, 20)
+        self.fc3 = nn.Linear(20, 10)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
