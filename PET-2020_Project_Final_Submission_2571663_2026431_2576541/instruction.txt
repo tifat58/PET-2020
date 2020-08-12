@@ -1,0 +1,36 @@
+
+Run main.py file to select the attack type and dataset.
+--------------------------------------------------------------
+Attack name and dataset is taken as user argument.
+Additionally you can change the batch sizes, number of epochs for each models during the single liner call of each model in main.py
+Also the hyperparemeters alpha, beta, gamma, lamda, class label for attack 1 can be changed in main.py 
+
+default: 40 epochs and 64 batch size is used
+
+***********************************************
+
+attack_1_membership_inference_mnist_fmnist.py file contains membership inference attack (attack 1) for dataset mnist and fashion mnist
+attack1_membership_Inference_cifar10.py for attack 1 with cifar10 dataset
+
+attack1_membership_Inference_cifar10.py contains membership inference attack (attack 2)
+
+model_stealer.py file contains Model stealing attack (attack 3)
+
+
+Jupyter notebook version with executed results for attack 1 and 2 from phase 1 are available in Phase_1_Attacks_in_Notebook directory
+
+
+*****************************************************************
+
+Group Information:
+1) Name: Benjamin Hollinger
+    Matriculation Number: 2026431
+    Email: beho5001@stud.uni-saarland.de
+
+2) Name: Hasan Md Tusfiqur Alam
+    Matriculation Number: 2571663
+    Email: s8haalam@stud.uni-saarland.de
+
+3) Name: Rayhanul Islam Rumel
+    Matriculation Number: 2576541
+    Email: s8rarume@stud.uni-saarland.de  
