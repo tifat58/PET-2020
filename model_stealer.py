@@ -13,20 +13,32 @@ from torchvision.datasets import FakeData
 
 
 #input_size = 784
-batch_size = 4
+batch_size = 1
 
 class Net(nn.Module):
     def __init__(self, input_size):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_size, 20)
-        self.fc2 = nn.Linear(20, 20)
-        self.fc3 = nn.Linear(20, 10)
+        self.conv1 = nn.Conv2d(3, 32, (5,5), padding=2)
+        self.conv2 = nn.Conv2d(32, 32, (5,5))
+        self.fc1   = nn.Linear(32*6*6, 128)
+        self.fc2   = nn.Linear(128, 10)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return F.log_softmax(x, dim=0)
+        x = F.max_pool2d(F.relu(self.conv1(x)), (2,2))
+        x = F.max_pool2d(F.relu(self.conv2(x)), (2,2))
+        x = x.view(-1, self.num_flat_features(x))
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+    def num_flat_features(self, x):
+        size = x.size()[1:]
+        # print(size)
+        num_features = 1
+        for s in size:
+            num_features *= s
+        # print(num_features)
+        return num_features
 
 class CustomFakeDataset(Dataset):
     """
@@ -61,6 +73,7 @@ class CustomFakeDataset(Dataset):
 
         # convert to PIL Image
         img = transforms.ToPILImage()(img)
+
         if self.transform is not None:
             img = self.transform(img)
         if self.target_transform is not None:
@@ -84,15 +97,15 @@ def train_model(train_model, train_loader, epochs, input_size):
     train_model.train()
 
     # define optimizer and loss function
-    optimizer = optim.SGD(train_model.parameters(), lr=0.01, momentum=0.5)
-    criterion = nn.NLLLoss()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(train_model.parameters(), lr=0.001, momentum=0.9)
 
     # train for the specified number of epochs
     for epoch in range(epochs):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             data, target = Variable(data), Variable(target)
-            data = data.view(-1, input_size)
+            #data = data.view(-1, input_size)
             train_model_out = train_model(data)
             loss = criterion(train_model_out, target)
             loss.backward()
@@ -121,12 +134,17 @@ def evaluate_model(eval_model, eval_loader, input_size):
         for data in eval_loader:
             images, labels = data
             images = Variable(images)
-            images = images.view(-1, input_size)
+            #images = images.view(-1, input_size)
             outputs = eval_model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
+
+            for pred in predicted:
+                predictions[pred.item()] = predictions[pred.item()] +1
             correct += (predicted == labels).sum().item()
     print('Accuracy: %d %%' % (100 * correct / total))
+
+predictions = [0,0,0,0,0,0,0,0,0,0]
 
 
 def query_model(model, image, input_size):
@@ -137,11 +155,17 @@ def query_model(model, image, input_size):
     :return: the predicted class
     """
     image = Variable(image)
-    image = image.view(-1, input_size)
+    # add a dimenstion to emulate batch size signifier when querying the source model later
+    image = image[None, :, :, :]
+    #image = image.view(-1, input_size)
     with torch.no_grad():
         outputs = model(image)
     _, predicted = torch.max(outputs.data, 1)
+    #print(outputs.data)
+    #print(predicted)
+    #exit(1)
     predicted = predicted[0]
+    predictions[predicted] = predictions[predicted] +1
     # return the class label
     return predicted
 
@@ -201,7 +225,7 @@ def main(dataset_name):
         target_model = Net(model_input_size)
 
     # Initialize the loaders for both datasets
-    target_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    target_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     target_verify_loader = torch.utils.data.DataLoader(verify_dataset, batch_size=batch_size, shuffle=True)
 
     # Initialize the target model
@@ -219,6 +243,7 @@ def main(dataset_name):
     # build the training dataset and loader for the attack model
     attack_train_dataset = CustomFakeDataset(size=60000, image_size = model_input_dimensions, source_model=target_model, transform = transform, target_transform = target_transform, target_model_input_size=model_input_size)
     attack_train_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
+    attack_verify_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
 
     # Initialize the attack model
     attack_model = Net(model_input_size)
@@ -231,9 +256,10 @@ def main(dataset_name):
     #attack_model.load_state_dict(torch.load(ATTACK_MODEL_PATH))
 
     # Evaluate model accuracy
-    #evaluate_model(target_model, target_verify_loader, model_input_size)
-    #evaluate_model(attack_model, target_verify_loader, model_input_size)
+    evaluate_model(target_model, target_verify_loader, model_input_size)
+    evaluate_model(attack_model, target_verify_loader, model_input_size)
 
+    print(predictions)
     # Calculate the average distance between the weights of the hidden layers of both models
     layer_size = target_model.fc2.weight.data.size(0)
     distance = target_model.fc2.weight.data - attack_model.fc2.weight.data
