@@ -1,27 +1,28 @@
 import torch
 import torchvision
 import torchvision.transforms as transforms
-import matplotlib.pyplot as plt
-import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from PIL import Image
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
-from torchvision.datasets import FakeData
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-#input_size = 784
-batch_size = 128
+batch_size = 4
 
 class Net(nn.Module):
-    def __init__(self, input_size):
+    def __init__(self, dataset_name):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, (5,5), padding=2)
-        self.conv2 = nn.Conv2d(32, 32, (5,5))
-        self.fc1   = nn.Linear(32*6*6, 128)
-        self.fc2   = nn.Linear(128, 10)
+        # model configuration depends on used dataset
+        if (dataset_name == "cifar10"):
+            self.conv1 = nn.Conv2d(3, 32, (5,5), padding=2)
+            self.conv2 = nn.Conv2d(32, 32, (5,5))
+            self.fc1   = nn.Linear(32*6*6, 128)
+            self.fc2   = nn.Linear(128, 10)
+        else:
+            self.conv1 = nn.Conv2d(1, 6, (5,5), padding=2)
+            self.conv2 = nn.Conv2d(6, 16, (5,5))
+            self.fc1   = nn.Linear(16*5*5, 128)
+            self.fc2   = nn.Linear(128, 10)
 
     def forward(self, x):
         x = F.max_pool2d(F.relu(self.conv1(x)), (2,2))
@@ -33,11 +34,9 @@ class Net(nn.Module):
 
     def num_flat_features(self, x):
         size = x.size()[1:]
-        # print(size)
         num_features = 1
         for s in size:
             num_features *= s
-        # print(num_features)
         return num_features
 
 class CustomFakeDataset(Dataset):
@@ -106,8 +105,6 @@ def train_model(train_model, train_loader, epochs, input_size):
             optimizer.zero_grad()
             data, target = Variable(data), Variable(target)
             #data = data.view(-1, input_size)
-            data = data.to(device)
-            target = target.to(device)
             train_model_out = train_model(data)
             loss = criterion(train_model_out, target)
             loss.backward()
@@ -136,20 +133,12 @@ def evaluate_model(eval_model, eval_loader, input_size):
         for data in eval_loader:
             images, labels = data
             images = Variable(images)
-            images = images.to(device)
-            labels = labels.to(device)
             #images = images.view(-1, input_size)
             outputs = eval_model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
-
-            for pred in predicted:
-                predictions[pred.item()] = predictions[pred.item()] +1
             correct += (predicted == labels).sum().item()
     print('Accuracy: %d %%' % (100 * correct / total))
-
-predictions = [0,0,0,0,0,0,0,0,0,0]
-
 
 def query_model(model, image, input_size):
     """
@@ -158,20 +147,13 @@ def query_model(model, image, input_size):
     :param image: the image to query the model with
     :return: the predicted class
     """
-    model.to(device)
     image = Variable(image)
     # add a dimenstion to emulate batch size signifier when querying the source model later
     image = image[None, :, :, :]
-    image = image.to(device)
     #image = image.view(-1, input_size)
     with torch.no_grad():
         outputs = model(image)
     _, predicted = torch.max(outputs.data, 1)
-    #print(outputs.data)
-    #print(predicted)
-    #exit(1)
-    predicted = predicted[0]
-    predictions[predicted] = predictions[predicted] +1
     # return the class label
     return predicted
 
@@ -199,7 +181,7 @@ def main(dataset_name):
                  (0.5,), (0.5,))
          ])
 
-    # Define constants used to store / load datasets and model weights
+    # Define constant defaults used to store / load datasets and model weights
     DATASET_PATH = './data'
     TARGET_MODEL_PATH = './model_stealing_target_model.pth'
     ATTACK_MODEL_PATH = './model_stealing_attack_model.pth'
@@ -211,7 +193,10 @@ def main(dataset_name):
         # mnist dataset contains of 28 * 28 pixel images
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
-        target_model = Net(model_input_size).to(device)
+        target_model = Net(dataset_name)
+        TARGET_MODEL_PATH = './model_stealing_target_model_mnist.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_mnist.pth'
+
 
     if dataset_name == "fashion-mnist":
         train_dataset = torchvision.datasets.FashionMNIST(root = './data', train = True, transform = transform, download=True)
@@ -219,7 +204,10 @@ def main(dataset_name):
         # fashion-mnist dataset contains of 28 * 28 pixel images
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
-        target_model = Net(model_input_size).to(device)
+        target_model = Net(dataset_name)
+        TARGET_MODEL_PATH = './model_stealing_target_model_fmnist.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_fmnist.pth'
+
 
 
     if dataset_name == "cifar10":
@@ -228,7 +216,10 @@ def main(dataset_name):
         # cifar10 dataset contains of 32 * 32 pixel images
         model_input_size = 32 * 32 * 3
         model_input_dimensions = (3, 32, 32)
-        target_model = Net(model_input_size).to(device)
+        target_model = Net(dataset_name)
+        TARGET_MODEL_PATH = './model_stealing_target_model_cifar10.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_cifar10.pth'
+
 
     # Initialize the loaders for both datasets
     target_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
@@ -239,7 +230,7 @@ def main(dataset_name):
 
 
     # Train the target model (uncomment to enable training instead of loading pretrained model data)
-    target_model = train_model(target_model, target_train_loader, 6, model_input_size)
+    target_model = train_model(target_model, target_train_loader, 20, model_input_size)
     torch.save(target_model.state_dict(), TARGET_MODEL_PATH)
 
     # Load the pretrained target model (comment out to enable training instead of loading pretrained model data)
@@ -252,8 +243,8 @@ def main(dataset_name):
     attack_verify_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
 
     # Initialize the attack model
-    attack_model = Net(model_input_size).to(device)
-    print("Training Attack Model: ")
+    attack_model = Net(model_input_size)
+
     # Train the attack model (uncomment to enable training instead of loading pretrained model data)
     attack_model = train_model(attack_model, attack_train_loader, 20, model_input_size)
     torch.save(attack_model.state_dict(), ATTACK_MODEL_PATH)
@@ -265,7 +256,6 @@ def main(dataset_name):
     evaluate_model(target_model, target_verify_loader, model_input_size)
     evaluate_model(attack_model, target_verify_loader, model_input_size)
 
-    print(predictions)
     # Calculate the average distance between the weights of the hidden layers of both models
     layer_size = target_model.fc2.weight.data.size(0)
     distance = target_model.fc2.weight.data - attack_model.fc2.weight.data
@@ -276,4 +266,4 @@ def main(dataset_name):
 # called by main.py
 #main("mnist")
 #main("fashion-mnist")
-main("cifar10")
+#main("cifar10")
