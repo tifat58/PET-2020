@@ -13,7 +13,7 @@ from torchvision.datasets import FakeData
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 #input_size = 784
-batch_size = 128
+# batch_size = 128
 
 class Net(nn.Module):
     def __init__(self, input_size):
@@ -40,6 +40,7 @@ class Net(nn.Module):
         # print(num_features)
         return num_features
 
+
 class CustomFakeDataset(Dataset):
     """
     This dataset generates random images and labels them with a class label queried from a source model (in this case the target model)
@@ -54,6 +55,7 @@ class CustomFakeDataset(Dataset):
         self.transform = transform
         self.target_transform = target_transform
         self.target_model_input_size = target_model_input_size
+
     def __getitem__(self, index):
         """
         Args:
@@ -85,9 +87,9 @@ class CustomFakeDataset(Dataset):
     def __len__(self):
         return self.size
 
+
 def train_model(train_model, train_loader, epochs, input_size):
     """
-
     :param train_model: the model to be trained
     :param train_loader: the loader accessing the training dataset
     :param epochs: number of epochs during training
@@ -112,7 +114,7 @@ def train_model(train_model, train_loader, epochs, input_size):
             loss = criterion(train_model_out, target)
             loss.backward()
             optimizer.step()
-            if batch_idx % 5000 == 0:
+            if batch_idx % 200 == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(train_loader.dataset),
                                100. * batch_idx / len(train_loader), loss.data.item()))
@@ -185,12 +187,21 @@ def target_transform (model, image, input_size):
     return query_model(model, image, input_size)
 
 # Main flow ------------------------------------------------------------------------------------------------------------
-def main(dataset_name):
+def main(dataset_name, target_num_epoch=20, attack_num_epoch=20, batch_size=64):
     if dataset_name not in ["mnist", "fashion-mnist", "cifar10"]:
         print("unknown dataset given: ", dataset_name)
         return
 
-    print("Starting attack 'Model stealing' with dataset: ", dataset_name)
+    target_epoch = target_num_epoch
+    attack_epoch = attack_num_epoch
+
+    print("########################################\n")
+    print("Selected Attack: Model Stealing (Attack 3)")
+    print("Selected Dataset: ", dataset_name)
+    print("Train epoch for target model: ", target_epoch)
+    print("Train epoch for Attack model: ", attack_epoch)
+    print("Batch Size: ", batch_size)
+    print("\n########################################\n")
 
     # Initialize transform function for data sets
     transform = torchvision.transforms.Compose([
@@ -201,14 +212,14 @@ def main(dataset_name):
 
     # Define constants used to store / load datasets and model weights
     DATASET_PATH = './data'
-    TARGET_MODEL_PATH = './model_stealing_target_model.pth'
-    ATTACK_MODEL_PATH = './model_stealing_attack_model.pth'
 
     # build the training and evaluation dataset for the target model
     if dataset_name == "mnist":
         train_dataset = torchvision.datasets.MNIST(root = './data', train = True, transform = transform, download=True)
         verify_dataset = torchvision.datasets.MNIST(root = './data', train = False, transform = transform, download=True)
         # mnist dataset contains of 28 * 28 pixel images
+        TARGET_MODEL_PATH = './model_stealing_target_model_mnist.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_mnist.pth'
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
         target_model = Net(model_input_size).to(device)
@@ -216,6 +227,8 @@ def main(dataset_name):
     if dataset_name == "fashion-mnist":
         train_dataset = torchvision.datasets.FashionMNIST(root = './data', train = True, transform = transform, download=True)
         verify_dataset = torchvision.datasets.FashionMNIST(root = './data', train = False, transform = transform, download=True)
+        TARGET_MODEL_PATH = './model_stealing_target_model_fmnist.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_fmnist.pth'
         # fashion-mnist dataset contains of 28 * 28 pixel images
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
@@ -225,6 +238,8 @@ def main(dataset_name):
     if dataset_name == "cifar10":
         train_dataset = torchvision.datasets.CIFAR10(root = './data', train = True, transform = transform, download=True)
         verify_dataset = torchvision.datasets.CIFAR10(root = './data', train = False, transform = transform, download=True)
+        TARGET_MODEL_PATH = './model_stealing_target_model_cifar10.pth'
+        ATTACK_MODEL_PATH = './model_stealing_attack_model_cifar10.pth'
         # cifar10 dataset contains of 32 * 32 pixel images
         model_input_size = 32 * 32 * 3
         model_input_dimensions = (3, 32, 32)
@@ -237,10 +252,11 @@ def main(dataset_name):
     # Initialize the target model
     #target_model = Net(model_input_size)
 
-
+    print("\nTraining Target Model....")
     # Train the target model (uncomment to enable training instead of loading pretrained model data)
-    target_model = train_model(target_model, target_train_loader, 50, model_input_size)
+    target_model = train_model(target_model, target_train_loader, target_epoch, model_input_size)
     torch.save(target_model.state_dict(), TARGET_MODEL_PATH)
+    print("Training Model Validation Accuracy: ")
     evaluate_model(target_model, target_verify_loader, model_input_size)
     # Load the pretrained target model (comment out to enable training instead of loading pretrained model data)
     # target_model.load_state_dict(torch.load(TARGET_MODEL_PATH))
@@ -257,23 +273,28 @@ def main(dataset_name):
         for tg in target:
             lbl_list[tg] = lbl_list[tg] + 1
 
+    print("Random images prediction class distribution by target Model: ")
     print(lbl_list)
     # exit()
     # Initialize the attack model
     attack_model = Net(model_input_size).to(device)
-    print("Training Attack Model: ")
+    print("Training Attack Model.... ")
     # Train the attack model (uncomment to enable training instead of loading pretrained model data)
-    attack_model = train_model(attack_model, attack_train_loader, 25, model_input_size)
+    attack_model = train_model(attack_model, attack_train_loader, attack_epoch, model_input_size)
     torch.save(attack_model.state_dict(), ATTACK_MODEL_PATH)
 
     # Load the pretrained attack model (comment out to enable training instead of loading pretrained model data)
     #attack_model.load_state_dict(torch.load(ATTACK_MODEL_PATH))
 
     # Evaluate model accuracy
-    evaluate_model(target_model, target_verify_loader, model_input_size)
-    evaluate_model(attack_model, target_verify_loader, model_input_size)
+    print("\n############## Results ########\n")
 
-    print(predictions)
+    print("Random images prediction class distribution by target Model: ", lbl_list)
+    print("Target Model Test Accuracy: ")
+    evaluate_model(target_model, target_verify_loader, model_input_size)
+    print("Attack Model Test Accuracy: ")
+    evaluate_model(attack_model, target_verify_loader, model_input_size)
+    # print(predictions)
     # Calculate the average distance between the weights of the hidden layers of both models
     layer_size = target_model.fc2.weight.data.size(0)
     distance = target_model.fc2.weight.data - attack_model.fc2.weight.data

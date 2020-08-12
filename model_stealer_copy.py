@@ -6,8 +6,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-batch_size = 4
+batch_size = 128
 
 class Net(nn.Module):
     def __init__(self, dataset_name):
@@ -104,6 +105,8 @@ def train_model(train_model, train_loader, epochs, input_size):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             data, target = Variable(data), Variable(target)
+            data = data.to(device)
+            target = target.to(device)
             #data = data.view(-1, input_size)
             train_model_out = train_model(data)
             loss = criterion(train_model_out, target)
@@ -114,6 +117,7 @@ def train_model(train_model, train_loader, epochs, input_size):
                         epoch, batch_idx * len(data), len(train_loader.dataset),
                                100. * batch_idx / len(train_loader), loss.data.item()))
     return train_model
+
 
 def evaluate_model(eval_model, eval_loader, input_size):
     """
@@ -133,6 +137,9 @@ def evaluate_model(eval_model, eval_loader, input_size):
         for data in eval_loader:
             images, labels = data
             images = Variable(images)
+            images = images.to(device)
+            labels = labels.to(device)
+
             #images = images.view(-1, input_size)
             outputs = eval_model(images)
             _, predicted = torch.max(outputs.data, 1)
@@ -147,14 +154,18 @@ def query_model(model, image, input_size):
     :param image: the image to query the model with
     :return: the predicted class
     """
+    model.to(device)
     image = Variable(image)
     # add a dimenstion to emulate batch size signifier when querying the source model later
     image = image[None, :, :, :]
+    image = image.to(device)
     #image = image.view(-1, input_size)
     with torch.no_grad():
         outputs = model(image)
     _, predicted = torch.max(outputs.data, 1)
     # return the class label
+    predicted = predicted[0]
+
     return predicted
 
 def target_transform (model, image, input_size):
@@ -193,7 +204,7 @@ def main(dataset_name):
         # mnist dataset contains of 28 * 28 pixel images
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
-        target_model = Net(dataset_name)
+        target_model = Net(dataset_name).to(device)
         TARGET_MODEL_PATH = './model_stealing_target_model_mnist.pth'
         ATTACK_MODEL_PATH = './model_stealing_attack_model_mnist.pth'
 
@@ -204,7 +215,7 @@ def main(dataset_name):
         # fashion-mnist dataset contains of 28 * 28 pixel images
         model_input_size = 28 * 28
         model_input_dimensions = (28, 28)
-        target_model = Net(dataset_name)
+        target_model = Net(dataset_name).to(device)
         TARGET_MODEL_PATH = './model_stealing_target_model_fmnist.pth'
         ATTACK_MODEL_PATH = './model_stealing_attack_model_fmnist.pth'
 
@@ -216,7 +227,7 @@ def main(dataset_name):
         # cifar10 dataset contains of 32 * 32 pixel images
         model_input_size = 32 * 32 * 3
         model_input_dimensions = (3, 32, 32)
-        target_model = Net(dataset_name)
+        target_model = Net(dataset_name).to(device)
         TARGET_MODEL_PATH = './model_stealing_target_model_cifar10.pth'
         ATTACK_MODEL_PATH = './model_stealing_attack_model_cifar10.pth'
 
@@ -228,13 +239,13 @@ def main(dataset_name):
     # Initialize the target model
     #target_model = Net(model_input_size)
 
-
+    print("Training Target Model with Dataset")
     # Train the target model (uncomment to enable training instead of loading pretrained model data)
     target_model = train_model(target_model, target_train_loader, 20, model_input_size)
     torch.save(target_model.state_dict(), TARGET_MODEL_PATH)
 
     # Load the pretrained target model (comment out to enable training instead of loading pretrained model data)
-    #target_model.load_state_dict(torch.load(TARGET_MODEL_PATH))
+    # target_model.load_state_dict(torch.load(TARGET_MODEL_PATH))
 
 
     # build the training dataset and loader for the attack model
@@ -242,9 +253,18 @@ def main(dataset_name):
     attack_train_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
     attack_verify_loader = torch.utils.data.DataLoader(attack_train_dataset, batch_size=batch_size, shuffle=True)
 
-    # Initialize the attack model
-    attack_model = Net(model_input_size)
+    lbl_list = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for img, target in attack_train_loader:
+        print(target)
+        for tg in target:
+            lbl_list[tg] = lbl_list[tg] + 1
 
+    print(lbl_list)
+
+    # Initialize the attack model
+    attack_model = Net(model_input_size).to(device)
+
+    print("Training Attack Model with random images and corresponding target model output as y")
     # Train the attack model (uncomment to enable training instead of loading pretrained model data)
     attack_model = train_model(attack_model, attack_train_loader, 20, model_input_size)
     torch.save(attack_model.state_dict(), ATTACK_MODEL_PATH)
@@ -264,6 +284,6 @@ def main(dataset_name):
 
 
 # called by main.py
-#main("mnist")
-#main("fashion-mnist")
-#main("cifar10")
+# main("mnist")
+main("fashion-mnist")
+# main("cifar10")
