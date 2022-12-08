@@ -1,7 +1,7 @@
 attrs==19.3.0
 backcall==0.1.0
 bleach==3.1.5
-certifi==2018.10.15
+certifi==2022.12.7
 chardet==3.0.4
 Click==7.0
 cloudpickle==0.5.6
